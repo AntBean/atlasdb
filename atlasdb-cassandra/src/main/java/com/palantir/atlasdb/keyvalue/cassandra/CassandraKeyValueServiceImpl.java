@@ -31,9 +31,11 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -78,6 +80,7 @@ import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
 import com.google.common.collect.TreeMultimap;
 import com.google.common.primitives.UnsignedBytes;
+import com.google.common.util.concurrent.Uninterruptibles;
 import com.palantir.async.initializer.AsyncInitializer;
 import com.palantir.atlasdb.AtlasDbConstants;
 import com.palantir.atlasdb.cassandra.CassandraKeyValueServiceConfig;
@@ -151,7 +154,12 @@ public class CassandraKeyValueServiceImpl extends AbstractKeyValueService
         implements AsyncInitializer, CassandraKeyValueService {
 
     public static class InitializeCheckingWrapper implements AutoDelegate_CassandraKeyValueService {
+        private enum Status {
+            OPEN, CLOSING, CLOSED
+        }
+
         private CassandraKeyValueServiceImpl kvs;
+        private volatile Status status = Status.OPEN;
 
         public InitializeCheckingWrapper(CassandraKeyValueServiceImpl kvs) {
             this.kvs = kvs;
@@ -159,6 +167,12 @@ public class CassandraKeyValueServiceImpl extends AbstractKeyValueService
 
         @Override
         public CassandraKeyValueService delegate() {
+            if (status == Status.CLOSING) {
+                close();
+                if (status != Status.CLOSED) {
+                    throw new NotInitializedException("CassandraKeyValueService");
+                }
+            }
             if (kvs.isInitialized()) {
                 return kvs;
             }
@@ -168,6 +182,24 @@ public class CassandraKeyValueServiceImpl extends AbstractKeyValueService
         @Override
         public boolean supportsCheckAndSet() {
             return kvs.supportsCheckAndSet();
+        }
+
+        @Override
+        public CassandraClientPool getClientPool() {
+            return kvs.getClientPool();
+        }
+
+        @Override
+        public void close() {
+            if (status != Status.CLOSED) {
+                status = Status.OPEN;
+                try {
+                    delegate().close();
+                    status = Status.CLOSED;
+                } catch (NotInitializedException e) {
+                    status = Status.CLOSING;
+                }
+            }
         }
     }
 

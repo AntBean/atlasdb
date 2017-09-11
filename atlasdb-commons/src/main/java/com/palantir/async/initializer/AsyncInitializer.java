@@ -76,4 +76,8 @@ public interface AsyncInitializer {
     void tryInitialize();
 
     void cleanUpOnInitFailure();
+
+    default void close() {
+        // you must implement this method if you are asynchronously initializing a closeable class
+    }
 }
