@@ -136,8 +136,6 @@ public class StartupIndependenceEteTest {
         try {
             canPerformTransaction();
             return true;
-        } catch (AtlasDbRemoteException e) {
-            return true;
         } catch (Exception e) {
             return false;
         }
